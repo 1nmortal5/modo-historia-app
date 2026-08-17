@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modo Historia Yael</title>
+  <!-- React y ReactDOM desde CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel para interpretar JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons y Recharts -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+</head>
+<body style="margin:0; background:#121110;">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // Polyfill de storage local para que funcione sin errores
+    if (!window.storage) {
+      window.storage = {
+        get: async (key) => {
+          const val = localStorage.getItem(key);
+          return val ? { value: val } : null;
+        },
+        set: async (key, value) => {
+          localStorage.setItem(key, value);
+        }
+      };
+    }
+  </script>
+
+  <!-- Carga del archivo ejecutable -->
+  <script type="text/babel" src="./App.jsx"></script>
+</body>
+</html>
