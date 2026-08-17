@@ -4,20 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Modo Historia Yael</title>
-  <!-- React y ReactDOM desde CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <!-- Babel para interpretar JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Lucide Icons y Recharts -->
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
 </head>
-<body style="margin:0; background:#121110;">
+<body style="margin:0; background:#121110; color:white;">
   <div id="root"></div>
 
-  <script type="text/babel">
-    // Polyfill de storage local para que funcione sin errores
+  <script>
+    // Storage local polyfill
     if (!window.storage) {
       window.storage = {
         get: async (key) => {
@@ -31,7 +29,16 @@
     }
   </script>
 
-  <!-- Carga del archivo ejecutable -->
-  <script type="text/babel" src="./App.jsx"></script>
+  <script type="text/babel" data-presets="react">
+    // Exponer Lucide y Recharts globalmente para evitar errores de importación
+    const { useState, useEffect, useRef } = React;
+    const { 
+      Check, X, Plus, Trash2, Coins, AlertTriangle, 
+      Award, Zap, Target, Shield, BookOpen, Flame 
+    } = lucide;
+    const { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } = Recharts;
+  </script>
+
+  <script type="text/babel" data-presets="react" src="./App.jsx"></script>
 </body>
 </html>
