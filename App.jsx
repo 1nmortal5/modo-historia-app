@@ -1167,3 +1167,4 @@ function StyleBlock() {
     `}</style>
   );
 }
+ReactDOM.createRoot(document.getElementById('root')).render(<ModoHistoriaYael />);
