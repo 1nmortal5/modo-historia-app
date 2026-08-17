@@ -8,37 +8,23 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
 </head>
-<body style="margin:0; background:#121110; color:white;">
+<body class="bg-[#121110] text-white">
   <div id="root"></div>
 
-  <script>
-    // Storage local polyfill
-    if (!window.storage) {
-      window.storage = {
-        get: async (key) => {
-          const val = localStorage.getItem(key);
-          return val ? { value: val } : null;
-        },
-        set: async (key, value) => {
-          localStorage.setItem(key, value);
-        }
-      };
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      return (
+        <div class="min-h-screen flex flex-col items-center justify-center p-4 text-center">
+          <h1 class="text-3xl font-bold text-amber-500 mb-2">Modo Historia Yael</h1>
+          <p class="text-gray-400">¡La aplicación está en línea y funcionando correctamente!</p>
+        </div>
+      );
     }
-  </script>
 
-  <script type="text/babel" data-presets="react">
-    // Exponer Lucide y Recharts globalmente para evitar errores de importación
-    const { useState, useEffect, useRef } = React;
-    const { 
-      Check, X, Plus, Trash2, Coins, AlertTriangle, 
-      Award, Zap, Target, Shield, BookOpen, Flame 
-    } = lucide;
-    const { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } = Recharts;
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
-
-  <script type="text/babel" data-presets="react" src="./App.jsx"></script>
 </body>
 </html>
