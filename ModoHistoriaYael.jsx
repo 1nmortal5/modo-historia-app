@@ -1,0 +1,1169 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Check, X, Plus, Trash2, Coins, AlertTriangle } from "lucide-react";
+import {
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+  ResponsiveContainer,
+} from "recharts";
+
+/* ============================== DATA ============================== */
+
+const LEVEL_XP = [
+  100, 150, 250, 350, 450, 550, 650, 750, 850, 1000, 1150, 1300, 1450, 1600,
+  1750, 1900, 2050, 2200, 2350, 2500, 2750, 3000, 3250, 3500, 3750, 4150,
+  4550, 4950, 5350, 5750, 6150, 6550, 6950, 7350, 7750, 8250, 8650, 9050,
+  9450, 9850, 10250, 10650, 11050, 11450, 11850, 12250, 12650, 13050, 13450,
+  13850,
+];
+
+const RANKS = [
+  { min: 1, max: 10, name: "Recluta" },
+  { min: 11, max: 20, name: "Discípulo" },
+  { min: 21, max: 30, name: "Practicante" },
+  { min: 31, max: 40, name: "Maestro" },
+  { min: 41, max: 50, name: "Leyenda" },
+];
+
+const AREAS = [
+  { id: "salud", label: "Salud" },
+  { id: "mente", label: "Mente" },
+  { id: "dinero", label: "Dinero" },
+  { id: "disciplina", label: "Disciplina" },
+  { id: "relaciones", label: "Relaciones" },
+];
+const AREA_LABEL = Object.fromEntries(AREAS.map((a) => [a.id, a.label]));
+
+const DEFAULT_DAILY = [
+  { id: "d1", name: "Tender la cama", area: "disciplina" },
+  { id: "d2", name: "Caminar o estirar 10 min", area: "salud" },
+  { id: "d3", name: "Vaso grande de agua al despertar", area: "salud" },
+  { id: "d4", name: "Ordenar algo 10 min", area: "disciplina" },
+  { id: "d5", name: "Un gesto o mensaje genuino a alguien importante", area: "relaciones" },
+];
+
+const DEFAULT_KEY = [
+  { id: "k1", name: "Entrenar 30–45 min", area: "salud" },
+  { id: "k2", name: "Estudiar 45–60 min", area: "mente" },
+  { id: "k3", name: "Dormir a la hora acordada", area: "salud" },
+  { id: "k4", name: "Comer sin refresco / ultraprocesados", area: "salud" },
+  { id: "k5", name: "20 min de acción que genere ingresos", area: "dinero" },
+];
+
+const DEFAULT_WEEKLY = [
+  { id: "w1", name: "Planear la semana (20 min)", area: "disciplina" },
+  { id: "w2", name: "Limpieza a fondo de cuarto o escritorio", area: "disciplina" },
+  { id: "w3", name: "Revisión de finanzas (15 min)", area: "dinero" },
+  { id: "w4", name: "Revisión de ingresos: qué funcionó (30 min)", area: "dinero" },
+  { id: "w5", name: "Tiempo de calidad con alguien importante (30–45 min)", area: "relaciones" },
+];
+
+const DEFAULT_SHOP = [
+  { id: "s1", name: "Episodio de serie o 30–45 min de juego", cost: 15 },
+  { id: "s2", name: "Postre o snack planeado", cost: 25 },
+  { id: "s3", name: "Salida corta / café", cost: 40 },
+  { id: "s4", name: "Algo más grande (compra pequeña o plan especial)", cost: 80 },
+];
+
+const PENALIZACIONES = [
+  "10–15 min limpiar algo específico",
+  "20 sentadillas + 10 min caminata suave",
+  "10 min de tarea aburrida (platos, archivos)",
+  "Bloqueo de ocio 30 min (sin redes ni YouTube)",
+];
+
+const TABS = [
+  { id: "mission", label: "Misiones" },
+  { id: "trampas", label: "Trampas" },
+  { id: "radar", label: "Radar" },
+  { id: "tienda", label: "Tienda" },
+  { id: "log", label: "Bitácora" },
+];
+
+const STORAGE_KEY = "yael-rpg-state-v1";
+
+/* ============================== HELPERS ============================== */
+
+const pad = (n) => String(n).padStart(2, "0");
+const toISODate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const todayStr = () => toISODate(new Date());
+const parseISO = (s) => {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+};
+const mondayOf = (d) => {
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const m = new Date(d);
+  m.setDate(d.getDate() + diff);
+  return toISODate(m);
+};
+const addDays = (d, n) => {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+};
+const fmtLabel = (s) => {
+  try {
+    return parseISO(s).toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" });
+  } catch {
+    return s;
+  }
+};
+
+const levelReq = (level) => LEVEL_XP[Math.min(level, 50) - 1];
+const rankOf = (level) => RANKS.find((r) => level >= r.min && level <= r.max)?.name || "Leyenda";
+
+function createInitialState() {
+  const today = todayStr();
+  return {
+    version: 1,
+    level: 1,
+    levelXP: 0,
+    totalXPEarned: 0,
+    gold: 0,
+    hearts: 5,
+    weekStart: mondayOf(new Date()),
+    lastActiveDate: today,
+    consecutiveFallWeeks: 0,
+    bossFightPending: null,
+    bossFightCompletedThisWeek: false,
+    areas: { salud: 0, mente: 0, dinero: 0, disciplina: 0, relaciones: 0 },
+    keyStatsWeek: { done: 0, possible: 0 },
+    missions: {
+      daily: DEFAULT_DAILY.map((m) => ({ ...m, done: false })),
+      key: DEFAULT_KEY.map((m) => ({ ...m, status: "pending" })),
+      weekly: DEFAULT_WEEKLY.map((m) => ({ ...m, done: false })),
+    },
+    shop: DEFAULT_SHOP,
+    log: [],
+    weeklyHistory: [],
+  };
+}
+
+function addLog(state, text, deltas = {}) {
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    date: todayStr(),
+    text,
+    xp: deltas.xp || 0,
+    gold: deltas.gold || 0,
+    hearts: deltas.hearts || 0,
+  };
+  return { ...state, log: [entry, ...state.log].slice(0, 150) };
+}
+
+function bumpArea(state, areaId, delta) {
+  if (!areaId) return state;
+  const areas = { ...state.areas };
+  areas[areaId] = Math.max(0, Math.min(100, (areas[areaId] || 0) + delta));
+  return { ...state, areas };
+}
+
+function applyXPGold(state, xpDelta, goldDelta = 0) {
+  let s = { ...state };
+  s.gold = Math.max(0, s.gold + goldDelta);
+  if (xpDelta > 0) s.totalXPEarned += xpDelta;
+  let xp = Math.max(0, s.levelXP + xpDelta);
+  let level = s.level;
+  while (level < 50 && xp >= levelReq(level)) {
+    xp -= levelReq(level);
+    level += 1;
+  }
+  s.level = level;
+  s.levelXP = xp;
+  return s;
+}
+
+function computeTier(state) {
+  const { done, possible } = state.keyStatsWeek;
+  const rate = possible > 0 ? done / possible : 1;
+  if (rate >= 0.6) return "leve";
+  if (rate >= 0.4) return "media";
+  return "fuerte";
+}
+
+function applyHearts(state, delta) {
+  let s = { ...state };
+  const before = s.hearts;
+  s.hearts = Math.max(0, Math.min(5, s.hearts + delta));
+  if (s.hearts === 0 && before > 0 && !s.bossFightPending && !s.bossFightCompletedThisWeek) {
+    s.bossFightPending = { tier: computeTier(s), triggeredAt: todayStr() };
+  }
+  return s;
+}
+
+function applyDayRollover(stateIn, dayLabel) {
+  let s = stateIn;
+  let doneOrMini = 0;
+  const keyLen = s.missions.key.length;
+  for (const m of s.missions.key) {
+    if (m.status === "pending") {
+      s = applyXPGold(s, -10, 0);
+      s = applyHearts(s, -1);
+      if (m.area) s = bumpArea(s, m.area, -10);
+      s = addLog(s, `Omisión automática (${dayLabel}): ${m.name}`, { xp: -10, hearts: -1 });
+    } else if (m.status === "done" || m.status === "mini") {
+      doneOrMini += 1;
+    }
+  }
+  s = {
+    ...s,
+    keyStatsWeek: { done: s.keyStatsWeek.done + doneOrMini, possible: s.keyStatsWeek.possible + keyLen },
+    missions: {
+      ...s.missions,
+      daily: s.missions.daily.map((m) => ({ ...m, done: false })),
+      key: s.missions.key.map((m) => ({ ...m, status: "pending" })),
+    },
+  };
+  return s;
+}
+
+function applyWeekRollover(stateIn) {
+  let s = stateIn;
+  const fell = s.hearts === 0;
+  const newStreak = fell ? s.consecutiveFallWeeks + 1 : 0;
+  const snapshot = {
+    weekStart: s.weekStart,
+    areas: s.areas,
+    hearts: s.hearts,
+    keyRate: s.keyStatsWeek.possible ? s.keyStatsWeek.done / s.keyStatsWeek.possible : null,
+  };
+  s = addLog(s, `Cierre de semana (${s.weekStart}) — corazones finales: ${s.hearts}/5`, {});
+  s = {
+    ...s,
+    hearts: 5,
+    consecutiveFallWeeks: newStreak,
+    bossFightPending: null,
+    bossFightCompletedThisWeek: false,
+    areas: { salud: 0, mente: 0, dinero: 0, disciplina: 0, relaciones: 0 },
+    keyStatsWeek: { done: 0, possible: 0 },
+    missions: { ...s.missions, weekly: s.missions.weekly.map((m) => ({ ...m, done: false })) },
+    weeklyHistory: [snapshot, ...s.weeklyHistory].slice(0, 8),
+  };
+  return s;
+}
+
+function processRollovers(initial) {
+  let s = initial;
+  let cursor = parseISO(s.lastActiveDate);
+  const today = parseISO(todayStr());
+  let guard = 0;
+  while (cursor.getTime() < today.getTime() && guard < 60) {
+    const dayLabel = toISODate(cursor);
+    s = applyDayRollover(s, dayLabel);
+    const nextDay = addDays(cursor, 1);
+    const curMon = mondayOf(cursor);
+    const nextMon = mondayOf(nextDay);
+    if (curMon !== nextMon) {
+      s = applyWeekRollover(s);
+      s = { ...s, weekStart: nextMon };
+    }
+    cursor = nextDay;
+    guard++;
+  }
+  s = { ...s, lastActiveDate: todayStr() };
+  return s;
+}
+
+function getBossFightPlan(tier, route, streak) {
+  const plans = {
+    leve: {
+      A: ["3 horas caminando, en bloques (60 + 60 + 60 min)", "Agua y descansos obligatorios entre bloques"],
+      B: ["2 horas de trabajo profundo (1 bloque, sin redes)", "15 min de cierre: resumen + 3 acciones para la semana"],
+    },
+    media: {
+      A: ["60–75 min de fuerza (circuitos), intensidad controlada", "30–45 min de caminata después"],
+      B: [
+        "3 horas de trabajo profundo (2 bloques de 90 min)",
+        "45 min de limpieza / orden",
+        "15 min de cierre: resumen + 3 acciones",
+      ],
+    },
+    fuerte: {
+      A: ["25,000 pasos en el día", "Agua y descansos; sin forzar dolor articular"],
+      B: [
+        "4 horas de trabajo profundo (2 bloques de 2h)",
+        "Descanso de 30–60 min entre bloques",
+        "Cierre: preparar ropa/escritorio y 3 misiones del lunes",
+      ],
+    },
+  };
+  const base = plans[tier][route];
+  const extra = [];
+  if (streak >= 2) extra.push("Bloque extra de 60 min (físico o trabajo profundo) por caída consecutiva");
+  if (streak >= 3) extra.push("Reset de privilegios 24h: sin redes sociales ni streaming (solo lo necesario)");
+  return [...base, ...extra];
+}
+
+const TIER_LABEL = {
+  leve: "leve (≥60% misiones clave)",
+  media: "media (40–59% misiones clave)",
+  fuerte: "fuerte (<40% misiones clave)",
+};
+
+/* ============================== SMALL UI PIECES ============================== */
+
+function LevelRing({ level, progress }) {
+  const ticks = 28;
+  const filled = Math.round(Math.min(1, progress) * ticks);
+  const items = Array.from({ length: ticks }).map((_, i) => {
+    const angle = (i / ticks) * 360;
+    const isFilled = i < filled;
+    return (
+      <rect
+        key={i}
+        x={59}
+        y={4}
+        width={2.4}
+        height={11}
+        rx={1.2}
+        fill={isFilled ? "var(--gold)" : "var(--line)"}
+        transform={`rotate(${angle} 60 60)`}
+      />
+    );
+  });
+  return (
+    <svg viewBox="0 0 120 120" width="104" height="104">
+      {items}
+      <circle cx="60" cy="60" r="38" fill="var(--panel)" stroke="var(--line)" strokeWidth="1" />
+      <text x="60" y="57" textAnchor="middle" fontFamily="'Space Grotesk',sans-serif" fontSize="26" fontWeight="700" fill="var(--ink)">
+        {level}
+      </text>
+      <text x="60" y="74" textAnchor="middle" fontFamily="'IBM Plex Mono',monospace" fontSize="8.5" letterSpacing="2" fill="var(--ink-dim)">
+        NIVEL
+      </text>
+    </svg>
+  );
+}
+
+function HeartRow({ hearts }) {
+  return (
+    <div className="mhy-hearts">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span key={i} className={`heart-tick ${i < hearts ? "on" : ""}`} />
+      ))}
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="mhy-overlay" onClick={onClose}>
+      <div className="mhy-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="mhy-modal-head">
+          <span>{title}</span>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="mhy-modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function AddMissionForm({ onAdd, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [area, setArea] = useState("salud");
+  if (!open) {
+    return (
+      <button className="add-row-btn" onClick={() => setOpen(true)}>
+        <Plus size={13} /> Añadir misión
+      </button>
+    );
+  }
+  return (
+    <div className="add-row-form">
+      <input
+        className="input"
+        placeholder={placeholder || "Nombre de la misión"}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        autoFocus
+      />
+      <select className="input" value={area} onChange={(e) => setArea(e.target.value)}>
+        {AREAS.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.label}
+          </option>
+        ))}
+      </select>
+      <div className="add-row-actions">
+        <button
+          className="btn btn-gold"
+          onClick={() => {
+            if (!name.trim()) return;
+            onAdd({ name: name.trim(), area });
+            setName("");
+            setOpen(false);
+          }}
+        >
+          Guardar
+        </button>
+        <button className="btn btn-ghost" onClick={() => setOpen(false)}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== MAIN APP ============================== */
+
+export default function ModoHistoriaYael() {
+  const [game, setGame] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("mission");
+  const [toast, setToast] = useState(null);
+  const [showBadHabit, setShowBadHabit] = useState(false);
+  const [showBoss, setShowBoss] = useState(false);
+  const [bossRoute, setBossRoute] = useState(null);
+  const [omitFlowId, setOmitFlowId] = useState(null);
+  const [penalizeFlowId, setPenalizeFlowId] = useState(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const saveTimer = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY, false);
+        let s = res && res.value ? JSON.parse(res.value) : createInitialState();
+        s = processRollovers(s);
+        setGame(s);
+      } catch (e) {
+        setGame(processRollovers(createInitialState()));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!game) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      window.storage.set(STORAGE_KEY, JSON.stringify(game), false).catch(() => {});
+    }, 400);
+    return () => clearTimeout(saveTimer.current);
+  }, [game]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2200);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  if (loading || !game) {
+    return (
+      <div className="mhy">
+        <StyleBlock />
+        <div className="mhy-loading">Cargando Modo Historia…</div>
+      </div>
+    );
+  }
+
+  const notify = (msg) => setToast(msg);
+
+  /* ---- daily ---- */
+  const toggleDaily = (m) => {
+    setGame((prev) => {
+      const missions = prev.missions.daily.map((x) => (x.id === m.id ? { ...x, done: !x.done } : x));
+      const sign = !m.done ? 1 : -1;
+      let s = { ...prev, missions: { ...prev.missions, daily: missions } };
+      s = applyXPGold(s, 10 * sign, 0);
+      s = bumpArea(s, m.area, 10 * sign);
+      s = addLog(s, `${!m.done ? "Misión diaria completada" : "Misión diaria desmarcada"}: ${m.name}`, { xp: 10 * sign });
+      return s;
+    });
+    notify(!m.done ? `+10 XP · ${AREA_LABEL[m.area]} +10` : "−10 XP");
+  };
+
+  /* ---- weekly ---- */
+  const toggleWeekly = (m) => {
+    setGame((prev) => {
+      const missions = prev.missions.weekly.map((x) => (x.id === m.id ? { ...x, done: !x.done } : x));
+      const sign = !m.done ? 1 : -1;
+      let s = { ...prev, missions: { ...prev.missions, weekly: missions } };
+      s = applyXPGold(s, 50 * sign, 20 * sign);
+      s = bumpArea(s, m.area, 25 * sign);
+      s = addLog(s, `${!m.done ? "Misión semanal completada" : "Misión semanal desmarcada"}: ${m.name}`, {
+        xp: 50 * sign,
+        gold: 20 * sign,
+      });
+      return s;
+    });
+    notify(!m.done ? `+50 XP · +20 Oro` : "−50 XP · −20 Oro");
+  };
+
+  /* ---- key ---- */
+  const keyDone = (m) => {
+    setGame((prev) => {
+      const missions = prev.missions.key.map((x) => (x.id === m.id ? { ...x, status: "done" } : x));
+      let s = { ...prev, missions: { ...prev.missions, key: missions } };
+      s = applyXPGold(s, 20, 5);
+      s = bumpArea(s, m.area, 15);
+      s = addLog(s, `Misión clave completada: ${m.name}`, { xp: 20, gold: 5 });
+      return s;
+    });
+    notify(`+20 XP · +5 Oro`);
+  };
+
+  const keyUndo = (m) => {
+    setGame((prev) => {
+      let s = prev;
+      if (m.status === "done") {
+        s = applyXPGold(s, -20, -5);
+        s = bumpArea(s, m.area, -15);
+      } else if (m.status === "mini") {
+        s = applyXPGold(s, -10, 0);
+        s = bumpArea(s, m.area, -7);
+      }
+      const missions = s.missions.key.map((x) => (x.id === m.id ? { ...x, status: "pending" } : x));
+      return { ...s, missions: { ...s.missions, key: missions } };
+    });
+  };
+
+  const keyMini = (m) => {
+    setGame((prev) => {
+      const missions = prev.missions.key.map((x) => (x.id === m.id ? { ...x, status: "mini" } : x));
+      let s = { ...prev, missions: { ...prev.missions, key: missions } };
+      s = applyXPGold(s, 10, 0);
+      s = bumpArea(s, m.area, 7);
+      s = addLog(s, `Versión mini completada: ${m.name}`, { xp: 10 });
+      return s;
+    });
+    setOmitFlowId(null);
+    notify("+10 XP · versión mini");
+  };
+
+  const keyPenalize = (m, penalizacion) => {
+    setGame((prev) => {
+      const missions = prev.missions.key.map((x) => (x.id === m.id ? { ...x, status: "penalized" } : x));
+      let s = { ...prev, missions: { ...prev.missions, key: missions } };
+      s = applyXPGold(s, -10, 0);
+      s = applyHearts(s, -1);
+      s = bumpArea(s, m.area, -10);
+      s = addLog(s, `Omisión: ${m.name} → ${penalizacion}`, { xp: -10, hearts: -1 });
+      return s;
+    });
+    setOmitFlowId(null);
+    setPenalizeFlowId(null);
+    notify("−10 XP · −1 corazón");
+  };
+
+  const removeMission = (type, id) => {
+    setGame((prev) => ({ ...prev, missions: { ...prev.missions, [type]: prev.missions[type].filter((m) => m.id !== id) } }));
+  };
+
+  const addMission = (type, { name, area }) => {
+    setGame((prev) => {
+      const id = `${type[0]}${Date.now()}`;
+      const base = type === "key" ? { id, name, area, status: "pending" } : { id, name, area, done: false };
+      return { ...prev, missions: { ...prev.missions, [type]: [...prev.missions[type], base] } };
+    });
+  };
+
+  /* ---- bad habits ---- */
+  const submitBadHabit = ({ name, area, penalizacion }) => {
+    setGame((prev) => {
+      let s = applyXPGold(prev, -15, -5);
+      s = applyHearts(s, -1);
+      if (area) s = bumpArea(s, area, -10);
+      s = addLog(s, `Trampa: ${name} → ${penalizacion}`, { xp: -15, gold: -5, hearts: -1 });
+      return s;
+    });
+    setShowBadHabit(false);
+    notify("−15 XP · −5 Oro · −1 corazón");
+  };
+
+  /* ---- shop ---- */
+  const buyReward = (item) => {
+    if (game.gold < item.cost) return;
+    setGame((prev) => {
+      let s = { ...prev, gold: prev.gold - item.cost };
+      s = addLog(s, `Canjeado: ${item.name}`, { gold: -item.cost });
+      return s;
+    });
+    notify(`Canjeado: ${item.name}`);
+  };
+
+  const addShopItem = ({ name, cost }) => {
+    setGame((prev) => ({ ...prev, shop: [...prev.shop, { id: `s${Date.now()}`, name, cost }] }));
+  };
+
+  const removeShopItem = (id) => {
+    setGame((prev) => ({ ...prev, shop: prev.shop.filter((s) => s.id !== id) }));
+  };
+
+  /* ---- boss fight ---- */
+  const completeBossFight = () => {
+    setGame((prev) => {
+      let s = { ...prev, bossFightPending: null, bossFightCompletedThisWeek: true };
+      s = applyXPGold(s, 100, 30);
+      s = addLog(s, "Boss Fight completado — recompensa de resurrección", { xp: 100, gold: 30 });
+      return s;
+    });
+    setShowBoss(false);
+    setBossRoute(null);
+    notify("+100 XP · +30 Oro — ¡reviviste!");
+  };
+
+  const resetAll = () => {
+    setGame(createInitialState());
+    setConfirmReset(false);
+  };
+
+  const req = levelReq(game.level);
+  const progress = game.level >= 50 ? 1 : Math.min(1, game.levelXP / req);
+  const radarData = AREAS.map((a) => ({ area: a.label, value: game.areas[a.id] }));
+  const values = AREAS.map((a) => game.areas[a.id]);
+  const best = Math.max(...values, 1);
+  const threshold = best * 0.7;
+  const weakAreas = AREAS.filter((a) => game.areas[a.id] < threshold && best > 0);
+
+  return (
+    <div className="mhy">
+      <StyleBlock />
+
+      <div className="mhy-titlebar">
+        <span className="mhy-title">MODO HISTORIA · YAEL</span>
+        {!confirmReset ? (
+          <button className="text-btn faint" onClick={() => setConfirmReset(true)}>
+            reiniciar
+          </button>
+        ) : (
+          <span className="reset-confirm">
+            ¿Seguro?{" "}
+            <button className="text-btn danger" onClick={resetAll}>
+              sí
+            </button>{" "}
+            <button className="text-btn faint" onClick={() => setConfirmReset(false)}>
+              no
+            </button>
+          </span>
+        )}
+      </div>
+
+      <div className="mhy-header">
+        <LevelRing level={game.level} progress={progress} />
+        <div className="mhy-identity">
+          <div className="mhy-rank">{rankOf(game.level)}</div>
+          <div className="mhy-xp-label">
+            {game.levelXP} / {req} XP
+          </div>
+          <div className="mhy-xpbar">
+            <div className="mhy-xpbar-fill" style={{ width: `${progress * 100}%` }} />
+          </div>
+        </div>
+        <div className="mhy-resources">
+          <div className="mhy-gold">
+            <Coins size={14} />
+            <span>{game.gold}</span>
+          </div>
+          <HeartRow hearts={game.hearts} />
+        </div>
+      </div>
+
+      {game.bossFightPending && (
+        <div className="mhy-boss-banner">
+          <AlertTriangle size={16} />
+          <div className="bb-text">
+            <div className="bb-title">Boss Fight pendiente — caída {TIER_LABEL[game.bossFightPending.tier]}</div>
+            <div className="bb-sub">Corazones agotados esta semana. Elige tu ruta de resurrección.</div>
+          </div>
+          <button className="btn btn-danger" onClick={() => setShowBoss(true)}>
+            Ver
+          </button>
+        </div>
+      )}
+
+      <div className="mhy-tabs">
+        {TABS.map((t) => (
+          <button key={t.id} className={`mhy-tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mhy-content">
+        {tab === "mission" && (
+          <>
+            <Section title="Diarias" meta="+10 XP">
+              {game.missions.daily.map((m) => (
+                <div className="mission-row" key={m.id}>
+                  <button className={`chk ${m.done ? "chk-on" : ""}`} onClick={() => toggleDaily(m)}>
+                    {m.done && <Check size={13} />}
+                  </button>
+                  <div className="mission-info">
+                    <span className={`mission-name ${m.done ? "done" : ""}`}>{m.name}</span>
+                    <span className="mission-area">{AREA_LABEL[m.area]}</span>
+                  </div>
+                  <button className="icon-btn ghost" onClick={() => removeMission("daily", m.id)}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <AddMissionForm onAdd={(v) => addMission("daily", v)} />
+            </Section>
+
+            <Section title="Clave" meta="+20 XP · +5 Oro">
+              {game.missions.key.map((m) => (
+                <div className="mission-row-wrap" key={m.id}>
+                  <div className="mission-row">
+                    {m.status === "pending" && (
+                      <>
+                        <button className="chk" onClick={() => keyDone(m)}>
+                          <Check size={13} />
+                        </button>
+                        <div className="mission-info">
+                          <span className="mission-name">{m.name}</span>
+                          <span className="mission-area">{AREA_LABEL[m.area]} · clave</span>
+                        </div>
+                        <button className="text-btn danger" onClick={() => setOmitFlowId(omitFlowId === m.id ? null : m.id)}>
+                          no lo hice
+                        </button>
+                        <button className="icon-btn ghost" onClick={() => removeMission("key", m.id)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </>
+                    )}
+                    {m.status === "done" && (
+                      <>
+                        <span className="chk chk-on">
+                          <Check size={13} />
+                        </span>
+                        <div className="mission-info">
+                          <span className="mission-name done">{m.name}</span>
+                        </div>
+                        <button className="text-btn faint" onClick={() => keyUndo(m)}>
+                          deshacer
+                        </button>
+                      </>
+                    )}
+                    {m.status === "mini" && (
+                      <>
+                        <span className="chk chk-mini">½</span>
+                        <div className="mission-info">
+                          <span className="mission-name">{m.name} — mini</span>
+                        </div>
+                        <button className="text-btn faint" onClick={() => keyUndo(m)}>
+                          deshacer
+                        </button>
+                      </>
+                    )}
+                    {m.status === "penalized" && (
+                      <>
+                        <span className="chk chk-off">
+                          <X size={13} />
+                        </span>
+                        <div className="mission-info">
+                          <span className="mission-name muted">{m.name} — penalizada hoy</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {omitFlowId === m.id && penalizeFlowId !== m.id && (
+                    <div className="flow-row">
+                      <span className="flow-label">¿reparación?</span>
+                      <button className="chip" onClick={() => keyMini(m)}>
+                        mini-versión ahora (2 min)
+                      </button>
+                      <button className="chip danger" onClick={() => setPenalizeFlowId(m.id)}>
+                        registrar penalización
+                      </button>
+                    </div>
+                  )}
+                  {penalizeFlowId === m.id && (
+                    <div className="flow-row wrap">
+                      {PENALIZACIONES.map((p) => (
+                        <button key={p} className="chip" onClick={() => keyPenalize(m, p)}>
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <AddMissionForm onAdd={(v) => addMission("key", v)} />
+            </Section>
+
+            <Section title="Semanales" meta="+50 XP · +20 Oro">
+              {game.missions.weekly.map((m) => (
+                <div className="mission-row" key={m.id}>
+                  <button className={`chk ${m.done ? "chk-on" : ""}`} onClick={() => toggleWeekly(m)}>
+                    {m.done && <Check size={13} />}
+                  </button>
+                  <div className="mission-info">
+                    <span className={`mission-name ${m.done ? "done" : ""}`}>{m.name}</span>
+                    <span className="mission-area">{AREA_LABEL[m.area]}</span>
+                  </div>
+                  <button className="icon-btn ghost" onClick={() => removeMission("weekly", m.id)}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <AddMissionForm onAdd={(v) => addMission("weekly", v)} />
+            </Section>
+          </>
+        )}
+
+        {tab === "trampas" && (
+          <div className="trampas-panel">
+            <p className="panel-text">
+              Cada trampa cuesta 15 XP, 5 Oro y 1 corazón. Elige siempre una penalización útil: limpiar, moverte o una
+              tarea aburrida. Nunca hambre, dolor ni desvelo.
+            </p>
+            <button className="btn btn-danger wide" onClick={() => setShowBadHabit(true)}>
+              Registrar mal hábito
+            </button>
+            <div className="rule-box">
+              <div className="rule-title">Reglas anti-trampa</div>
+              <ul className="rule-list">
+                <li>Un mal día no es mala persona: solo pierdes puntos y se recuperan.</li>
+                <li>Si fallas 3 días seguidos, reduce la dificultad — no aumentes el castigo.</li>
+                <li>Las recompensas son extras: nunca te quites comida, sueño o afecto.</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {tab === "radar" && (
+          <div className="radar-panel">
+            <ResponsiveContainer width="100%" height={260}>
+              <RadarChart data={radarData} outerRadius="70%">
+                <PolarGrid stroke="var(--line)" />
+                <PolarAngleAxis dataKey="area" tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
+                <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
+                <Radar dataKey="value" stroke="var(--gold)" fill="var(--gold)" fillOpacity={0.28} strokeWidth={2} />
+              </RadarChart>
+            </ResponsiveContainer>
+            <div className={`balance-note ${weakAreas.length ? "warn" : "ok"}`}>
+              {weakAreas.length === 0
+                ? "Rango estable — creciendo parejo."
+                : `Rango inestable — refuerza: ${weakAreas.map((a) => a.label).join(", ")}.`}
+            </div>
+            <div className="area-list">
+              {AREAS.map((a) => (
+                <div className="area-row" key={a.id}>
+                  <span className="area-name">{a.label}</span>
+                  <div className="area-bar">
+                    <div className="area-bar-fill" style={{ width: `${game.areas[a.id]}%` }} />
+                  </div>
+                  <span className="area-val">{game.areas[a.id]}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === "tienda" && (
+          <div className="shop-panel">
+            {game.shop.map((item) => (
+              <div className="shop-row" key={item.id}>
+                <div className="shop-info">
+                  <span className="shop-name">{item.name}</span>
+                  <span className="shop-cost">
+                    <Coins size={11} /> {item.cost}
+                  </span>
+                </div>
+                <button className="btn btn-gold small" disabled={game.gold < item.cost} onClick={() => buyReward(item)}>
+                  Canjear
+                </button>
+                <button className="icon-btn ghost" onClick={() => removeShopItem(item.id)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+            <ShopAddForm onAdd={addShopItem} />
+          </div>
+        )}
+
+        {tab === "log" && (
+          <div className="log-panel">
+            {game.log.length === 0 && <p className="panel-text">Todavía no hay movimientos registrados.</p>}
+            {game.log.map((entry) => (
+              <div className="log-row" key={entry.id}>
+                <div className="log-date">{fmtLabel(entry.date)}</div>
+                <div className="log-text">{entry.text}</div>
+                <div className="log-deltas">
+                  {entry.xp !== 0 && <span className={entry.xp > 0 ? "ok" : "danger"}>{entry.xp > 0 ? `+${entry.xp}` : entry.xp} XP</span>}
+                  {entry.gold !== 0 && (
+                    <span className={entry.gold > 0 ? "gold" : "danger"}>{entry.gold > 0 ? `+${entry.gold}` : entry.gold} Oro</span>
+                  )}
+                  {entry.hearts !== 0 && <span className="danger">{entry.hearts} ♥</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {toast && <div className="mhy-toast">{toast}</div>}
+
+      {showBadHabit && <BadHabitModal onClose={() => setShowBadHabit(false)} onSubmit={submitBadHabit} />}
+
+      {showBoss && game.bossFightPending && (
+        <Modal title="Boss Fight — resurrección" onClose={() => setShowBoss(false)}>
+          <p className="panel-text">
+            Caída {TIER_LABEL[game.bossFightPending.tier]}
+            {game.consecutiveFallWeeks >= 2 ? " · caída consecutiva" : ""}. Elige tu ruta:
+          </p>
+          <div className="route-picker">
+            <button className={`route-btn ${bossRoute === "A" ? "active" : ""}`} onClick={() => setBossRoute("A")}>
+              Ruta física
+            </button>
+            <button className={`route-btn ${bossRoute === "B" ? "active" : ""}`} onClick={() => setBossRoute("B")}>
+              Ruta mental
+            </button>
+          </div>
+          {bossRoute && (
+            <>
+              <ul className="rule-list">
+                {getBossFightPlan(game.bossFightPending.tier, bossRoute, game.consecutiveFallWeeks).map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ul>
+              <button className="btn btn-gold wide" onClick={completeBossFight}>
+                Marcar Boss Fight completado (+100 XP · +30 Oro)
+              </button>
+            </>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, meta, children }) {
+  return (
+    <div className="mhy-section">
+      <div className="mhy-section-head">
+        <span className="mhy-section-title">{title}</span>
+        <span className="mhy-section-meta">{meta}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function BadHabitModal({ onClose, onSubmit }) {
+  const [name, setName] = useState("");
+  const [area, setArea] = useState("");
+  const [pen, setPen] = useState(null);
+  return (
+    <Modal title="Registrar mal hábito" onClose={onClose}>
+      <label className="field-label">¿Qué pasó?</label>
+      <input className="input" placeholder="Ej. procrastiné 1 hora" value={name} onChange={(e) => setName(e.target.value)} />
+      <label className="field-label">Área afectada (opcional)</label>
+      <select className="input" value={area} onChange={(e) => setArea(e.target.value)}>
+        <option value="">Ninguna</option>
+        {AREAS.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.label}
+          </option>
+        ))}
+      </select>
+      <label className="field-label">Penalización útil</label>
+      <div className="pen-list">
+        {PENALIZACIONES.map((p) => (
+          <button key={p} className={`chip block ${pen === p ? "active" : ""}`} onClick={() => setPen(p)}>
+            {p}
+          </button>
+        ))}
+      </div>
+      <button
+        className="btn btn-danger wide"
+        disabled={!pen}
+        onClick={() => onSubmit({ name: name.trim() || "Hábito no deseado", area, penalizacion: pen })}
+      >
+        Registrar (−15 XP · −5 Oro · −1 ♥)
+      </button>
+    </Modal>
+  );
+}
+
+function ShopAddForm({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [cost, setCost] = useState(15);
+  if (!open) {
+    return (
+      <button className="add-row-btn" onClick={() => setOpen(true)}>
+        <Plus size={13} /> Añadir recompensa
+      </button>
+    );
+  }
+  return (
+    <div className="add-row-form">
+      <input className="input" placeholder="Nombre de la recompensa" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      <input
+        className="input"
+        type="number"
+        min="1"
+        placeholder="Costo en Oro"
+        value={cost}
+        onChange={(e) => setCost(Number(e.target.value))}
+      />
+      <div className="add-row-actions">
+        <button
+          className="btn btn-gold"
+          onClick={() => {
+            if (!name.trim() || !cost) return;
+            onAdd({ name: name.trim(), cost });
+            setName("");
+            setOpen(false);
+          }}
+        >
+          Guardar
+        </button>
+        <button className="btn btn-ghost" onClick={() => setOpen(false)}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== STYLE ============================== */
+
+function StyleBlock() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+
+      .mhy {
+        --bg:#121110; --panel:#1b1815; --panel-2:#221e19; --line:#38332c;
+        --ink:#ede9e1; --ink-dim:#948c7c; --gold:#c79a46; --gold-soft:#8c6f34;
+        --danger:#b54a34; --ok:#8fa377;
+        background:var(--bg); color:var(--ink);
+        font-family:'Inter',sans-serif;
+        max-width:480px; margin:0 auto; border:1px solid var(--line); border-radius:16px;
+        overflow:hidden; position:relative;
+      }
+      .mhy *{ box-sizing:border-box; }
+      .mhy-loading{ padding:60px 20px; text-align:center; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace; font-size:13px; }
+
+      .mhy-titlebar{ display:flex; align-items:center; justify-content:space-between; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel-2); }
+      .mhy-title{ font-family:'Space Grotesk',sans-serif; font-size:11px; letter-spacing:2px; color:var(--gold); }
+      .reset-confirm{ font-size:11px; color:var(--ink-dim); }
+
+      .mhy-header{ display:flex; align-items:center; gap:14px; padding:18px 16px; border-bottom:1px solid var(--line); }
+      .mhy-identity{ flex:1; min-width:0; }
+      .mhy-rank{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; margin-bottom:3px; }
+      .mhy-xp-label{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-dim); margin-bottom:6px; }
+      .mhy-xpbar{ height:5px; background:var(--panel-2); border-radius:3px; overflow:hidden; border:1px solid var(--line); }
+      .mhy-xpbar-fill{ height:100%; background:var(--gold); transition:width .4s ease; }
+      .mhy-resources{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+      .mhy-gold{ display:flex; align-items:center; gap:5px; font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--gold); }
+      .mhy-hearts{ display:flex; gap:5px; }
+      .heart-tick{ width:9px; height:9px; background:var(--line); transform:rotate(45deg); display:inline-block; }
+      .heart-tick.on{ background:var(--danger); }
+
+      .mhy-boss-banner{ display:flex; align-items:center; gap:10px; padding:10px 14px; background:rgba(181,74,52,0.15); border-bottom:1px solid var(--line); color:var(--danger); }
+      .bb-text{ flex:1; }
+      .bb-title{ font-size:12px; font-weight:600; }
+      .bb-sub{ font-size:11px; color:var(--ink-dim); }
+
+      .mhy-tabs{ display:flex; border-bottom:1px solid var(--line); overflow-x:auto; }
+      .mhy-tab{ flex:1; background:none; border:none; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:11px 6px; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; }
+      .mhy-tab.active{ color:var(--gold); border-bottom-color:var(--gold); }
+
+      .mhy-content{ padding:16px; max-height:520px; overflow-y:auto; }
+
+      .mhy-section{ margin-bottom:18px; }
+      .mhy-section-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+      .mhy-section-title{ font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; }
+      .mhy-section-meta{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--gold-soft); }
+
+      .mission-row-wrap{ margin-bottom:6px; }
+      .mission-row{ display:flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 10px; }
+      .mission-info{ flex:1; display:flex; flex-direction:column; min-width:0; }
+      .mission-name{ font-size:13px; }
+      .mission-name.done{ color:var(--ink-dim); text-decoration:line-through; }
+      .mission-name.muted{ color:var(--ink-dim); }
+      .mission-area{ font-family:'IBM Plex Mono',monospace; font-size:9.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--ink-dim); margin-top:2px; }
+
+      .chk{ width:22px; height:22px; border-radius:6px; border:1px solid var(--line); background:var(--panel-2); display:flex; align-items:center; justify-content:center; color:var(--ink); cursor:pointer; flex-shrink:0; }
+      .chk-on{ background:var(--ok); border-color:var(--ok); color:#121110; }
+      .chk-mini{ width:22px; height:22px; border-radius:6px; border:1px solid var(--gold); background:transparent; color:var(--gold); display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:11px; flex-shrink:0; }
+      .chk-off{ width:22px; height:22px; border-radius:6px; border:1px solid var(--danger); color:var(--danger); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+
+      .icon-btn{ background:none; border:none; color:var(--ink-dim); cursor:pointer; padding:4px; display:flex; }
+      .icon-btn.ghost:hover{ color:var(--danger); }
+
+      .text-btn{ background:none; border:none; font-family:'IBM Plex Mono',monospace; font-size:10.5px; cursor:pointer; color:var(--ink-dim); white-space:nowrap; }
+      .text-btn.danger{ color:var(--danger); }
+      .text-btn.faint{ color:var(--ink-dim); }
+
+      .flow-row{ display:flex; align-items:center; gap:6px; padding:8px 4px 2px 32px; flex-wrap:wrap; }
+      .flow-row.wrap{ padding-left:32px; }
+      .flow-label{ font-size:10.5px; color:var(--ink-dim); margin-right:2px; }
+
+      .chip{ background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-size:11px; padding:6px 10px; border-radius:20px; cursor:pointer; }
+      .chip.danger{ border-color:var(--danger); color:var(--danger); }
+      .chip.block{ display:block; width:100%; text-align:left; border-radius:8px; margin-bottom:6px; }
+      .chip.active{ background:var(--gold); color:#121110; border-color:var(--gold); }
+
+      .add-row-btn{ display:flex; align-items:center; gap:5px; background:none; border:1px dashed var(--line); color:var(--ink-dim); font-size:11.5px; padding:8px 10px; border-radius:10px; cursor:pointer; width:100%; justify-content:center; margin-top:4px; }
+      .add-row-form{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px; margin-top:4px; display:flex; flex-direction:column; gap:6px; }
+      .add-row-actions{ display:flex; gap:8px; }
+
+      .input{ background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-size:12.5px; padding:8px 10px; border-radius:8px; font-family:'Inter',sans-serif; width:100%; }
+
+      .btn{ border:none; border-radius:9px; padding:9px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:'Inter',sans-serif; }
+      .btn.wide{ width:100%; }
+      .btn.small{ padding:6px 10px; font-size:11px; }
+      .btn:disabled{ opacity:.4; cursor:not-allowed; }
+      .btn-gold{ background:var(--gold); color:#121110; }
+      .btn-danger{ background:var(--danger); color:#f5efe9; }
+      .btn-ghost{ background:none; border:1px solid var(--line); color:var(--ink-dim); }
+
+      .panel-text{ font-size:12.5px; color:var(--ink-dim); line-height:1.5; margin-bottom:12px; }
+      .rule-box{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:14px; }
+      .rule-title{ font-family:'Space Grotesk',sans-serif; font-size:12px; font-weight:600; margin-bottom:6px; }
+      .rule-list{ margin:0; padding-left:16px; font-size:11.5px; color:var(--ink-dim); line-height:1.6; }
+
+      .balance-note{ text-align:center; font-size:11.5px; padding:8px; border-radius:8px; margin:6px 0 14px; font-family:'IBM Plex Mono',monospace; }
+      .balance-note.ok{ color:var(--ok); }
+      .balance-note.warn{ color:var(--danger); }
+      .area-list{ display:flex; flex-direction:column; gap:8px; }
+      .area-row{ display:flex; align-items:center; gap:8px; }
+      .area-name{ width:78px; font-size:11.5px; color:var(--ink-dim); flex-shrink:0; }
+      .area-bar{ flex:1; height:6px; background:var(--panel-2); border-radius:3px; overflow:hidden; border:1px solid var(--line); }
+      .area-bar-fill{ height:100%; background:var(--gold); }
+      .area-val{ width:26px; text-align:right; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-dim); }
+
+      .shop-row{ display:flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 10px; margin-bottom:6px; }
+      .shop-info{ flex:1; display:flex; flex-direction:column; }
+      .shop-name{ font-size:13px; }
+      .shop-cost{ display:flex; align-items:center; gap:4px; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--gold); margin-top:2px; }
+
+      .log-row{ padding:9px 0; border-bottom:1px solid var(--line); }
+      .log-date{ font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--ink-dim); letter-spacing:.5px; text-transform:uppercase; }
+      .log-text{ font-size:12.5px; margin:3px 0 4px; }
+      .log-deltas{ display:flex; gap:10px; font-family:'IBM Plex Mono',monospace; font-size:11px; }
+      .log-deltas .ok{ color:var(--ok); }
+      .log-deltas .gold{ color:var(--gold); }
+      .log-deltas .danger{ color:var(--danger); }
+
+      .mhy-toast{ position:absolute; top:14px; left:50%; transform:translateX(-50%); background:var(--panel-2); border:1px solid var(--gold); color:var(--ink); font-family:'IBM Plex Mono',monospace; font-size:12px; padding:8px 14px; border-radius:20px; box-shadow:0 6px 20px rgba(0,0,0,.4); z-index:50; animation: mhy-toast-in .25s ease; }
+      @keyframes mhy-toast-in{ from{ opacity:0; transform:translate(-50%,-8px);} to{ opacity:1; transform:translate(-50%,0);} }
+
+      .mhy-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
+      .mhy-modal{ background:var(--panel); border:1px solid var(--line); border-radius:14px; max-width:400px; width:100%; max-height:85vh; overflow-y:auto; }
+      .mhy-modal-head{ display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; }
+      .mhy-modal-body{ padding:16px; }
+      .field-label{ display:block; font-size:11px; color:var(--ink-dim); margin:10px 0 5px; }
+      .field-label:first-child{ margin-top:0; }
+      .pen-list{ margin:6px 0 14px; }
+
+      .route-picker{ display:flex; gap:8px; margin-bottom:14px; }
+      .route-btn{ flex:1; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:10px; border-radius:9px; font-size:12.5px; cursor:pointer; }
+      .route-btn.active{ background:var(--gold); color:#121110; border-color:var(--gold); font-weight:600; }
+    `}</style>
+  );
+}
